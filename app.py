@@ -1,236 +1,284 @@
+# app.py (or codesense_app.py)
+
 import streamlit as st
 import os
 import shutil
+import logging
 from langchain_community.vectorstores import Chroma
-# from langchain_openai import OpenAIEmbeddings, ChatOpenAI # Remove or comment out
-from langchain_google_genai import GoogleGenerativeAIEmbeddings, ChatGoogleGenerativeAI # Add these
+from langchain_google_genai import GoogleGenerativeAIEmbeddings, ChatGoogleGenerativeAI
 from langchain.text_splitter import RecursiveCharacterTextSplitter, Language
 from langchain_community.document_loaders import DirectoryLoader, TextLoader
 from langchain.chains import RetrievalQA
 from langchain.prompts import PromptTemplate
-from langchain.memory import ConversationBufferMemory
-from langchain.chains import ConversationalRetrievalChain
+from langchain.schema import Document # Used for type hinting
+import google.generativeai as genai
 
 # --- Configuration ---
-DEFAULT_CODE_DIR = "./my-java-project"
-VECTORSTORE_DIR = "./java_vectorstore_gemini" # Use a different dir for Gemini embeddings
-# Google AI Model Names (check Google AI Studio for latest free tier models)
+DEFAULT_CODE_DIR = "./my-java-project" # CHANGE THIS if your code is elsewhere
+VECTORSTORE_DIR = "./java_vectorstore_gemini" # Directory for ChromaDB files
+# Google AI Model Names (Ensure these are available in your region/tier)
 GEMINI_EMBEDDING_MODEL = "models/embedding-001"
-GEMINI_LLM_MODEL = "gemini-2.5-pro-exp-03-25" # Or "gemini-1.5-flash" if available/preferred
+GEMINI_LLM_MODEL = "gemini-1.5-pro-latest" # Or "gemini-1.5-flash-latest", "gemini-pro"
 
-# --- Helper Functions ---
+# Setup logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
+# --- LangChain & Indexing Functions ---
+
+# Modified to accept api_key
 @st.cache_resource(show_spinner="Loading and Indexing Java Code (Gemini)...")
-def create_or_load_index(code_dir: str, vectorstore_path: str, force_reindex: bool = False):
-    """Loads Java code, splits it, creates Gemini embeddings, and stores them in ChromaDB."""
+def create_or_load_vectorstore(
+    code_dir: str,
+    vectorstore_path: str,
+    embedding_model_name: str,
+    api_key: str, # <<< Added API key argument
+    force_reindex: bool = False
+) -> Chroma | None:
+    """
+    Loads Java code, splits it, creates Gemini embeddings (using the provided API key),
+    and stores/loads them in ChromaDB.
+    Returns the Chroma vector store instance or None if an error occurs.
+    """
+    vector_store = None
+    embeddings = None
+
+    # Check if API key was passed
+    if not api_key:
+        st.error("API Key is missing. Cannot initialize embeddings.")
+        logging.error("API Key is missing in create_or_load_vectorstore.")
+        return None
+
+    try:
+        # Pass the API key directly to the constructor <<< FIX
+        embeddings = GoogleGenerativeAIEmbeddings(
+            model=embedding_model_name,
+            google_api_key=api_key
+        )
+        logging.info(f"Initialized GoogleGenerativeAIEmbeddings with model: {embedding_model_name}")
+    except Exception as e:
+        # Catch errors related to API key/permissions during embedding initialization
+        st.error(f"Failed to initialize Google Embeddings. Error: {e}. Make sure your API key is valid and has permissions.")
+        logging.error(f"Failed to initialize Google Embeddings: {e}", exc_info=True)
+        return None # Can't proceed without embeddings
+
+    # --- Load Existing or Re-index ---
     if os.path.exists(vectorstore_path) and not force_reindex:
-        st.info(f"Loading existing vector store from {vectorstore_path}")
-        # Use Google Embeddings for loading existing store
-        embeddings = GoogleGenerativeAIEmbeddings(model=GEMINI_EMBEDDING_MODEL)
-        vector_store = Chroma(persist_directory=vectorstore_path, embedding_function=embeddings)
-        return vector_store
+        try:
+            st.info(f"Loading existing vector store from {vectorstore_path}")
+            logging.info(f"Loading existing vector store from {vectorstore_path}")
+            # Use the already initialized embeddings object
+            vector_store = Chroma(persist_directory=vectorstore_path, embedding_function=embeddings)
+            st.sidebar.success("Vector store loaded.")
+            logging.info("Vector store loaded successfully.")
+            return vector_store
+        except Exception as e:
+            st.warning(f"Failed to load existing vector store: {e}. Will attempt to re-index.")
+            logging.warning(f"Failed to load existing vector store from {vectorstore_path}: {e}", exc_info=True)
+            # Clean up potentially corrupted directory before re-indexing
+            try:
+                shutil.rmtree(vectorstore_path)
+                logging.info(f"Removed potentially corrupted directory: {vectorstore_path}")
+            except Exception as rm_err:
+                st.error(f"Error removing corrupted vector store directory: {rm_err}")
+                logging.error(f"Error removing corrupted directory {vectorstore_path}: {rm_err}", exc_info=True)
+                return None # Stop if we can't clean up
+
     elif os.path.exists(vectorstore_path) and force_reindex:
          st.info(f"Re-indexing: Removing existing vector store at {vectorstore_path}")
-         shutil.rmtree(vectorstore_path) # Remove old index
+         logging.info(f"Re-indexing: Removing existing vector store at {vectorstore_path}")
+         try:
+            shutil.rmtree(vectorstore_path)
+         except Exception as e:
+            st.error(f"Error removing vector store directory for re-indexing: {e}")
+            logging.error(f"Error removing vector store directory {vectorstore_path} for re-indexing: {e}", exc_info=True)
+            return None # Stop if we can't remove the old index
 
+    # --- Create New Index ---
     if not os.path.exists(code_dir):
         st.error(f"Error: Code directory '{code_dir}' not found.")
+        logging.error(f"Code directory '{code_dir}' not found.")
         return None
 
     st.info(f"Creating new vector store from code in {code_dir}")
+    logging.info(f"Creating new vector store from code in {code_dir}")
     try:
-        # Load .java files (same as before)
+        # 1. Load .java files
         loader = DirectoryLoader(
             code_dir,
-            glob="**/*.java",
-            loader_cls=TextLoader,
+            glob="**/*.java", # Recursive search for .java files
+            loader_cls=TextLoader, # Use TextLoader for source code
             show_progress=True,
-            use_multithreading=True
+            use_multithreading=True, # Speed up loading
+            loader_kwargs={'autodetect_encoding': True} # Handle potential encoding issues
         )
         documents = loader.load()
+        logging.info(f"Loaded {len(documents)} raw documents.")
 
         if not documents:
-            st.warning("No .java files found in the specified directory.")
+            st.warning("No .java files found in the specified directory. The index will be empty.")
+            logging.warning(f"No .java files found in {code_dir}.")
             return None
 
-        # Split documents (same as before)
+        # 2. Split documents into chunks suitable for embedding
         java_splitter = RecursiveCharacterTextSplitter.from_language(
             language=Language.JAVA, chunk_size=1500, chunk_overlap=150
         )
         split_docs = java_splitter.split_documents(documents)
+        logging.info(f"Split documents into {len(split_docs)} chunks.")
 
-        # Add metadata (same as before)
+        # Optional: Add filename for easier source tracking
         for doc in split_docs:
             if 'source' in doc.metadata:
                 doc.metadata['filename'] = os.path.basename(doc.metadata['source'])
 
-        # --- Create Google AI Embeddings ---
-        st.info(f"Creating embeddings using Google AI '{GEMINI_EMBEDDING_MODEL}' (this might take a while)...")
-        try:
-            # Ensure API Key is set for embedding creation if not already loaded
-            if "GOOGLE_API_KEY" not in os.environ:
-                 st.error("Google API Key not found. Please set it in the sidebar.")
-                 return None
-            embeddings = GoogleGenerativeAIEmbeddings(model=GEMINI_EMBEDDING_MODEL)
-        except Exception as e:
-             st.error(f"Failed to initialize Google Embeddings. Error: {e}. Make sure your API key is correct and has permissions.")
-             return None
-        # --- End Embedding Change ---
-
-        # Create Chroma vector store and persist (same logic, different embedding function)
+        # 3. Create Chroma vector store and persist
+        st.info(f"Creating embeddings using Google AI '{embedding_model_name}' and storing in Chroma (this might take a while)...")
+        logging.info(f"Creating embeddings with {embedding_model_name} and storing in Chroma...")
+        # Use the embeddings object initialized earlier (which now includes the key)
         vector_store = Chroma.from_documents(
             documents=split_docs,
             embedding=embeddings,
-            persist_directory=vectorstore_path
+            persist_directory=vectorstore_path # Save to disk
         )
-        vector_store.persist()
+        vector_store.persist() # Ensure saving
         st.success(f"Vector store created and saved to {vectorstore_path}")
+        logging.info(f"Vector store created and saved to {vectorstore_path}")
+        st.sidebar.success("Vector store created.")
         return vector_store
 
     except Exception as e:
-        st.error(f"Error during indexing: {e}")
+        # Catch any other errors during the indexing process
+        st.error(f"Error during indexing process: {e}")
+        logging.error(f"Error during indexing process: {e}", exc_info=True)
         return None
 
-# --- Streamlit UI ---
+# This function remains unchanged, primarily used for logging/confirmation
+def configure_google_api(api_key: str):
+    """Configures the Google Generative AI client."""
+    try:
+        genai.configure(api_key=api_key)
+        logging.info("Google Generative AI client configured successfully.")
+        return True
+    except Exception as e:
+        st.error(f"Failed to configure Google AI client: {e}. Please check your API key.")
+        logging.error(f"Failed to configure Google AI client: {e}", exc_info=True)
+        return False
 
-st.set_page_config(
-    layout="wide",
-    page_title="CodeSense",
-    page_icon="🧠",
-    initial_sidebar_state="expanded"
-)
 
-# Custom CSS for better aesthetics
-st.markdown("""
-    <style>
-    .stApp {
-        background-color: #f8f9fa;
-    }
-    .stButton>button {
-        background-color: #4CAF50;
-        color: white;
-        border: none;
-        padding: 10px 20px;
-        border-radius: 5px;
-        transition: all 0.3s ease;
-    }
-    .stButton>button:hover {
-        background-color: #45a049;
-        transform: translateY(-2px);
-    }
-    .stTextInput>div>div>input {
-        border-radius: 5px;
-        border: 1px solid #ddd;
-    }
-    .stMarkdown {
-        color: #333;
-    }
-    .stCodeBlock {
-        background-color: #f8f9fa;
-        border-radius: 5px;
-        padding: 10px;
-        margin: 10px 0;
-    }
-    .stExpander {
-        background-color: white;
-        border-radius: 5px;
-        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-    }
-    </style>
-""", unsafe_allow_html=True)
+# --- Streamlit App ---
 
-# Header with logo and title
-col1, col2, col3 = st.columns([1,2,1])
-with col2:
-    st.title("🧠 CodeSense")
-    st.markdown("""
-        <div style='text-align: center; color: #666; font-size: 1.1em;'>
-            Ask questions about your Java codebase. The system will retrieve relevant code snippets and use Gemini to generate an answer.
-        </div>
-    """, unsafe_allow_html=True)
-
-# --- Sidebar for Configuration ---
-with st.sidebar:
-    st.markdown("""
-        <div style='background-color: #f8f9fa; padding: 20px; border-radius: 10px;'>
-            <h2 style='color: #333;'>⚙️ Configuration</h2>
-        </div>
-    """, unsafe_allow_html=True)
-
-    # --- Google AI API Key Input ---
-    google_api_key = st.text_input(
-        "🔑 Google AI API Key",
-        type="password",
-        help="Get yours from Google AI Studio (previously MakerSuite)."
-    )
-    if google_api_key:
-        os.environ["GOOGLE_API_KEY"] = google_api_key
-    elif "GOOGLE_API_KEY" in os.environ:
-        st.info("✅ Using Google AI API Key from environment variable.")
-        google_api_key = os.environ["GOOGLE_API_KEY"]
-    else:
-        st.warning("⚠️ Please enter your Google AI API Key to use the app.")
-        st.info("Please enter your Google AI API Key in the sidebar to proceed.")
-        st.stop()
-
-    # Code Directory Input
-    code_directory = st.text_input(
-        "📁 Path to your Java Codebase",
-        value=DEFAULT_CODE_DIR
+def main():
+    st.set_page_config(
+        page_title="CodeSense",
+        page_icon="💡",
+        layout="wide",
+        initial_sidebar_state="expanded"
     )
 
-    # Re-index Button with custom styling
+    # Apply Custom CSS (keep your styles here)
     st.markdown("""
         <style>
-        .reindex-button {
-            background-color: #ff9800;
-            color: white;
-            border: none;
-            padding: 10px 20px;
-            border-radius: 5px;
-            transition: all 0.3s ease;
-        }
-        .reindex-button:hover {
-            background-color: #f57c00;
-            transform: translateY(-2px);
-        }
+        /* ... Your CSS ... */
         </style>
     """, unsafe_allow_html=True)
-    force_reindex = st.button("🔄 Re-index Codebase", help="Click to delete the existing index and rebuild it from the source code.")
 
-# --- Main Application Logic ---
+    # --- Header ---
+    st.title("🧠 CodeSense: Java Codebase Q&A")
+    st.markdown("""
+        <div style='text-align: center; color: #666; font-size: 1.1em; margin-bottom: 20px;'>
+            Ask questions about your Java codebase. Relevant code snippets will be retrieved and used by Gemini to generate an answer.
+        </div>
+    """, unsafe_allow_html=True)
 
-# Load or create the vector store (uses the updated function)
-vector_store = create_or_load_index(code_directory, VECTORSTORE_DIR, force_reindex)
+    # --- Sidebar for Configuration ---
+    api_key_configured = False # Flag to track if key is set
+    actual_api_key = None      # Variable to hold the validated key
 
-if vector_store:
-    # Create the retriever (same as before)
-    retriever = vector_store.as_retriever(
-        search_type="similarity",
-        search_kwargs={"k": 5}
+    with st.sidebar:
+        st.markdown("## ⚙️ Configuration")
+
+        # --- Google AI API Key Input ---
+        google_api_key_input = st.text_input(
+            "🔑 Google AI API Key",
+            type="password",
+            value=os.environ.get("GOOGLE_API_KEY", ""), # Pre-fill if env var exists
+            help="Get yours from Google AI Studio. Stored securely for this session."
+        )
+
+        # Configure Google AI client immediately if key is provided
+        if google_api_key_input:
+            # Attempt to configure the base library (optional but good for consistency)
+            configure_google_api(google_api_key_input)
+            api_key_configured = True # Assume configured if user provided input
+            actual_api_key = google_api_key_input
+        elif "GOOGLE_API_KEY" in os.environ and os.environ["GOOGLE_API_KEY"]:
+             st.info("✅ Using Google AI API Key from environment.")
+             # Attempt to configure the base library (optional but good for consistency)
+             configure_google_api(os.environ["GOOGLE_API_KEY"])
+             api_key_configured = True
+             actual_api_key = os.environ["GOOGLE_API_KEY"]
+
+        if not api_key_configured:
+            st.warning("⚠️ Please enter your Google AI API Key to proceed.")
+            st.stop() # Stop execution if API key is not configured
+
+        # Code Directory Input
+        code_directory = st.text_input(
+            "📁 Path to Java Codebase",
+            value=DEFAULT_CODE_DIR,
+            help=f"The root directory containing your .java files. Default: {DEFAULT_CODE_DIR}"
+        )
+        st.info(f"Using Code Directory: `{os.path.abspath(code_directory)}`")
+        st.info(f"Using Vector Store: `{os.path.abspath(VECTORSTORE_DIR)}`")
+
+
+        # Re-index Button
+        force_reindex = st.button("🔄 Re-index Codebase", help="Delete the existing index and rebuild it from the source code directory.")
+        if force_reindex:
+             st.toast("Re-indexing requested...") # Use toast for temporary messages
+
+    # --- Main Application Logic ---
+
+    # Load or create the vector store, passing the API key <<< FIX
+    vector_store = create_or_load_vectorstore(
+        code_directory,
+        VECTORSTORE_DIR,
+        GEMINI_EMBEDDING_MODEL,
+        api_key=actual_api_key, # Pass the confirmed key
+        force_reindex=force_reindex
     )
 
-    # --- Initialize Google Gemini LLM ---
-    try:
-        llm = ChatGoogleGenerativeAI(
-            model=GEMINI_LLM_MODEL,
-            temperature=0.2,
-            convert_system_message_to_human=True # Important for Gemini with system prompts
-            # You might need to add safety_settings depending on your content/needs
-            # safety_settings = ...
-            )
-    except Exception as e:
-         st.error(f"Failed to initialize Google Gemini LLM. Error: {e}. Make sure your API key is correct.")
-         st.stop()
-    # --- End LLM Change ---
+    if not vector_store:
+        st.warning("⚠️ Vector store could not be loaded or created. Check configuration and logs.")
+        st.stop()
 
+    # Initialize LLM (can be cached if model parameters don't change often)
+    @st.cache_resource
+    def get_llm(model_name, api_key): # <<< Pass API key here too
+        try:
+            llm = ChatGoogleGenerativeAI(
+                model=model_name,
+                temperature=0.1,
+                google_api_key=api_key, # <<< Pass API key to LLM init
+                convert_system_message_to_human=True
+                )
+            logging.info(f"Initialized ChatGoogleGenerativeAI with model: {model_name}")
+            return llm
+        except Exception as e:
+            st.error(f"Error initializing Gemini LLM ({model_name}): {e}")
+            logging.error(f"Error initializing Gemini LLM ({model_name}): {e}", exc_info=True)
+            return None
 
-    # Define the prompt template (can often remain the same)
-    prompt_template = """You are an AI assistant helping developers understand a Java codebase.
-Use the following pieces of context (retrieved code snippets) to answer the question at the end.
-If you don't know the answer based on the context provided, just say that you don't know, don't try to make up an answer.
-If the context includes code, present the relevant code snippets clearly in your answer.
-Mention the source file (filename) if it's available in the context metadata.
+    # Pass the actual_api_key when getting the LLM <<< FIX
+    llm = get_llm(GEMINI_LLM_MODEL, actual_api_key)
+    if not llm:
+        st.stop()
+
+    # --- Setup RetrievalQA Chain ---
+    # Define the prompt template (remains the same)
+    prompt_template_str = """You are an expert Java programming assistant. Use the following pieces of context (Java code snippets) to answer the question accurately and concisely.
+If you don't know the answer based *only* on the provided context, just say that you cannot answer based on the context provided. Do not make up information.
+Always cite the relevant filename(s) from the context if possible.
 
 Context:
 {context}
@@ -238,97 +286,110 @@ Context:
 Question: {question}
 
 Helpful Answer:"""
-    QA_CHAIN_PROMPT = PromptTemplate(
-        input_variables=["context", "question"],
-        template=prompt_template,
+    QA_PROMPT = PromptTemplate(
+        template=prompt_template_str, input_variables=["context", "question"]
     )
 
-    # --- Conversational Chain Setup (same logic, uses the new llm) ---
+    # Create the retriever (remains the same)
+    retriever = vector_store.as_retriever(
+        search_type="similarity",
+        search_kwargs={"k": 4}
+    )
+
+    # Create the RetrievalQA chain (remains the same)
+    qa_chain = RetrievalQA.from_chain_type(
+        llm=llm,
+        chain_type="stuff",
+        retriever=retriever,
+        return_source_documents=True,
+        chain_type_kwargs={"prompt": QA_PROMPT}
+    )
+    logging.info("RetrievalQA chain created.")
+
+
+    # --- Chat Interface (remains the same) ---
+
+    # Initialize chat history in session state
     if "messages" not in st.session_state:
         st.session_state.messages = []
-    if "chat_history" not in st.session_state:
-         st.session_state.chat_history = []
 
-    # Display chat messages from history with enhanced styling
+    # Display chat messages from history
     for message in st.session_state.messages:
         with st.chat_message(message["role"]):
-            st.markdown(f"""
-                <div style='background-color: {'#e3f2fd' if message['role'] == 'assistant' else '#f5f5f5'}; 
-                          padding: 15px; 
-                          border-radius: 10px; 
-                          margin: 5px 0;'>
-                    {message['content']}
-                </div>
-            """, unsafe_allow_html=True)
+            st.markdown(message["content"])
+            # Display sources if they exist for assistant messages
+            if message["role"] == "assistant" and "sources" in message and message["sources"]:
+                with st.expander("View Sources Used"):
+                    for i, source_doc in enumerate(message["sources"]):
+                        try:
+                            filename = source_doc.metadata.get('filename', 'Unknown File')
+                            page_content = source_doc.page_content
+                            st.markdown(f"<div class='source-title'>Source {i+1}: {filename}</div>", unsafe_allow_html=True)
+                            st.code(page_content, language="java", line_numbers=False)
+                        except Exception as display_err:
+                             st.warning(f"Could not display source {i+1}: {display_err}")
 
-    # Create conversational chain (uses the new llm)
-    conversational_chain = ConversationalRetrievalChain.from_llm(
-        llm=llm,
-        retriever=retriever,
-        combine_docs_chain_kwargs={"prompt": QA_CHAIN_PROMPT},
-        return_source_documents=True,
-    )
-
-    # --- User Input and Interaction (mostly same logic) ---
-    user_query = st.chat_input("💭 Ask a question about the code...")
-
-    if user_query:
-        st.session_state.messages.append({"role": "user", "content": user_query})
+    # Accept user input
+    if prompt := st.chat_input("Ask about your Java codebase..."):
+        # Add user message to chat history
+        st.session_state.messages.append({"role": "user", "content": prompt})
         with st.chat_message("user"):
-            st.markdown(user_query)
+            st.markdown(prompt)
 
-        with st.spinner("Gemini is thinking..."):
-            try:
-                # Pass the current question and the managed chat history
-                result = conversational_chain({
-                    "question": user_query,
-                    "chat_history": st.session_state.chat_history
-                })
-                answer = result["answer"]
-                source_documents = result.get("source_documents", [])
+        # Generate response using the QA chain
+        with st.chat_message("assistant"):
+            message_placeholder = st.empty()
+            with st.spinner("Thinking... Retrieving context and generating answer..."):
+                try:
+                    logging.info(f"Invoking QA chain for query: '{prompt[:50]}...'")
+                    result = qa_chain.invoke({"query": prompt})
 
-                st.session_state.messages.append({"role": "assistant", "content": answer})
-                st.session_state.chat_history.append((user_query, answer))
+                    answer = result.get("result", "No answer found.")
+                    source_documents = result.get("source_documents", [])
 
-                with st.chat_message("assistant"):
-                    st.markdown(f"""
-                        <div style='background-color: #e3f2fd; 
-                                  padding: 15px; 
-                                  border-radius: 10px; 
-                                  margin: 5px 0;'>
-                            {answer}
-                        </div>
-                    """, unsafe_allow_html=True)
+                    logging.info(f"Received answer: '{answer[:100]}...'")
+                    logging.info(f"Retrieved {len(source_documents)} source documents.")
+
+                    # Display the main answer
+                    message_placeholder.markdown(answer)
+
+                    # Add assistant response and sources to chat history
+                    st.session_state.messages.append({
+                        "role": "assistant",
+                        "content": answer,
+                        "sources": source_documents
+                    })
+
+                    # Display the sources used in an expander
                     if source_documents:
-                        with st.expander("📚 See Relevant Code Snippets"):
-                            for doc in source_documents:
-                                filename = doc.metadata.get('filename', 'Unknown File')
-                                content_snippet = doc.page_content[:500] + "..." if len(doc.page_content) > 500 else doc.page_content
-                                st.markdown(f"""
-                                    <div style='background-color: #f8f9fa; 
-                                              padding: 15px; 
-                                              border-radius: 5px; 
-                                              margin: 10px 0;'>
-                                        <div style='color: #666; font-size: 0.9em; margin-bottom: 5px;'>
-                                            Source: {filename}
-                                        </div>
-                                        <pre style='background-color: #f1f1f1; padding: 10px; border-radius: 5px; overflow-x: auto;'>
-                                            {content_snippet}
-                                        </pre>
-                                    </div>
-                                """, unsafe_allow_html=True)
-                                st.divider()
+                        with st.expander("View Sources Used"):
+                             for i, source_doc in enumerate(source_documents):
+                                try:
+                                    filename = source_doc.metadata.get('filename', 'Unknown File')
+                                    page_content = source_doc.page_content
+                                    st.markdown(f"<div class='source-title'>Source {i+1}: {filename}</div>", unsafe_allow_html=True)
+                                    st.code(page_content, language="java", line_numbers=False)
+                                except Exception as display_err:
+                                    st.warning(f"Could not display source {i+1}: {display_err}")
 
-            except Exception as e:
-                # Specific check for potential Google API blocking (can be refined)
-                if "Candidate was blocked due to" in str(e) or "SAFETY" in str(e).upper():
-                     error_message = f"The response was blocked by Google's safety filters. This might be due to the retrieved code snippets or the question itself. Try rephrasing or ask about a different part of the code.\n\nDetails: {e}"
-                     st.error(error_message)
-                     st.session_state.messages.append({"role": "assistant", "content": error_message})
-                else:
-                    st.error(f"An error occurred: {e}")
-                    st.session_state.messages.append({"role": "assistant", "content": f"Sorry, an error occurred: {e}"})
+                except Exception as e:
+                    error_message = f"An error occurred while processing your query: {str(e)}"
+                    logging.error(f"Error processing query '{prompt[:50]}...': {e}", exc_info=True)
+                    message_placeholder.error(error_message)
+                    st.session_state.messages.append({
+                        "role": "assistant",
+                        "content": error_message,
+                        "sources": []
+                    })
 
+# --- Entry Point (remains the same) ---
+if __name__ == "__main__":
+    # Create the target directory if it doesn't exist
+    if not os.path.exists(DEFAULT_CODE_DIR):
+        try:
+            os.makedirs(DEFAULT_CODE_DIR)
+            logging.warning(f"Default code directory '{DEFAULT_CODE_DIR}' did not exist and was created. Please place your Java files inside.")
+        except OSError as e:
+            logging.error(f"Failed to create default code directory '{DEFAULT_CODE_DIR}': {e}")
 
-else:
-    st.warning("⚠️ Vector store could not be loaded or created. Please check the code directory path and permissions, and ensure your Google API Key is set.")
+    main()
