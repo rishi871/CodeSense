@@ -93,40 +93,110 @@ def create_or_load_index(code_dir: str, vectorstore_path: str, force_reindex: bo
 
 # --- Streamlit UI ---
 
-st.set_page_config(layout="wide", page_title="Streamsets CodeLense")
-st.title("💬 Streamsets CodeLense")
-st.markdown("Ask questions about your Java codebase. The system will retrieve relevant code snippets and use Gemini to generate an answer.")
+st.set_page_config(
+    layout="wide",
+    page_title="CodeSense",
+    page_icon="🧠",
+    initial_sidebar_state="expanded"
+)
+
+# Custom CSS for better aesthetics
+st.markdown("""
+    <style>
+    .stApp {
+        background-color: #f8f9fa;
+    }
+    .stButton>button {
+        background-color: #4CAF50;
+        color: white;
+        border: none;
+        padding: 10px 20px;
+        border-radius: 5px;
+        transition: all 0.3s ease;
+    }
+    .stButton>button:hover {
+        background-color: #45a049;
+        transform: translateY(-2px);
+    }
+    .stTextInput>div>div>input {
+        border-radius: 5px;
+        border: 1px solid #ddd;
+    }
+    .stMarkdown {
+        color: #333;
+    }
+    .stCodeBlock {
+        background-color: #f8f9fa;
+        border-radius: 5px;
+        padding: 10px;
+        margin: 10px 0;
+    }
+    .stExpander {
+        background-color: white;
+        border-radius: 5px;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+    </style>
+""", unsafe_allow_html=True)
+
+# Header with logo and title
+col1, col2, col3 = st.columns([1,2,1])
+with col2:
+    st.title("🧠 CodeSense")
+    st.markdown("""
+        <div style='text-align: center; color: #666; font-size: 1.1em;'>
+            Ask questions about your Java codebase. The system will retrieve relevant code snippets and use Gemini to generate an answer.
+        </div>
+    """, unsafe_allow_html=True)
 
 # --- Sidebar for Configuration ---
-st.sidebar.header("Configuration")
+with st.sidebar:
+    st.markdown("""
+        <div style='background-color: #f8f9fa; padding: 20px; border-radius: 10px;'>
+            <h2 style='color: #333;'>⚙️ Configuration</h2>
+        </div>
+    """, unsafe_allow_html=True)
 
-# --- Google AI API Key Input ---
-google_api_key = st.sidebar.text_input(
-    "Google AI API Key",
-    type="password",
-    help="Get yours from Google AI Studio (previously MakerSuite)."
-)
-if google_api_key:
-    os.environ["GOOGLE_API_KEY"] = "AIzaSyDCreBnk7MgG4W3CwgnrP1oXvOzkWoqETg"
-elif "GOOGLE_API_KEY" in os.environ:
-    # If already set in environment, use that.
-    st.sidebar.info("Using Google AI API Key from environment variable.")
-    google_api_key = os.environ["GOOGLE_API_KEY"] # Ensure it's available for checks
-else:
-     st.sidebar.warning("Please enter your Google AI API Key to use the app.")
-     st.info("Please enter your Google AI API Key in the sidebar to proceed.")
-     st.stop() # Stop execution if no key is provided
-# --- End API Key Change ---
+    # --- Google AI API Key Input ---
+    google_api_key = st.text_input(
+        "🔑 Google AI API Key",
+        type="password",
+        help="Get yours from Google AI Studio (previously MakerSuite)."
+    )
+    if google_api_key:
+        os.environ["GOOGLE_API_KEY"] = "AIzaSyDCreBnk7MgG4W3CwgnrP1oXvOzkWoqETg"
+    elif "GOOGLE_API_KEY" in os.environ:
+        st.info("✅ Using Google AI API Key from environment variable.")
+        google_api_key = os.environ["GOOGLE_API_KEY"]
+    else:
+        st.warning("⚠️ Please enter your Google AI API Key to use the app.")
+        st.info("Please enter your Google AI API Key in the sidebar to proceed.")
+        st.stop()
 
+    # Code Directory Input
+    code_directory = st.text_input(
+        "📁 Path to your Java Codebase",
+        value=DEFAULT_CODE_DIR
+    )
 
-# Code Directory Input (same as before)
-code_directory = st.sidebar.text_input(
-    "Path to your Java Codebase",
-    value=DEFAULT_CODE_DIR
-)
-
-# Re-index Button (same as before)
-force_reindex = st.sidebar.button("Re-index Codebase", help="Click to delete the existing index and rebuild it from the source code.")
+    # Re-index Button with custom styling
+    st.markdown("""
+        <style>
+        .reindex-button {
+            background-color: #ff9800;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 5px;
+            transition: all 0.3s ease;
+        }
+        .reindex-button:hover {
+            background-color: #f57c00;
+            transform: translateY(-2px);
+        }
+        </style>
+    """, unsafe_allow_html=True)
+    force_reindex = st.button("🔄 Re-index Codebase", help="Click to delete the existing index and rebuild it from the source code.")
 
 # --- Main Application Logic ---
 
@@ -179,10 +249,17 @@ Helpful Answer:"""
     if "chat_history" not in st.session_state:
          st.session_state.chat_history = []
 
-    # Display chat messages from history (same as before)
+    # Display chat messages from history with enhanced styling
     for message in st.session_state.messages:
         with st.chat_message(message["role"]):
-            st.markdown(message["content"])
+            st.markdown(f"""
+                <div style='background-color: {'#e3f2fd' if message['role'] == 'assistant' else '#f5f5f5'}; 
+                          padding: 15px; 
+                          border-radius: 10px; 
+                          margin: 5px 0;'>
+                    {message['content']}
+                </div>
+            """, unsafe_allow_html=True)
 
     # Create conversational chain (uses the new llm)
     conversational_chain = ConversationalRetrievalChain.from_llm(
@@ -193,7 +270,7 @@ Helpful Answer:"""
     )
 
     # --- User Input and Interaction (mostly same logic) ---
-    user_query = st.chat_input("Ask a question about the code...")
+    user_query = st.chat_input("💭 Ask a question about the code...")
 
     if user_query:
         st.session_state.messages.append({"role": "user", "content": user_query})
@@ -214,14 +291,32 @@ Helpful Answer:"""
                 st.session_state.chat_history.append((user_query, answer))
 
                 with st.chat_message("assistant"):
-                    st.markdown(answer)
+                    st.markdown(f"""
+                        <div style='background-color: #e3f2fd; 
+                                  padding: 15px; 
+                                  border-radius: 10px; 
+                                  margin: 5px 0;'>
+                            {answer}
+                        </div>
+                    """, unsafe_allow_html=True)
                     if source_documents:
-                        with st.expander("See Relevant Code Snippets"):
+                        with st.expander("📚 See Relevant Code Snippets"):
                             for doc in source_documents:
                                 filename = doc.metadata.get('filename', 'Unknown File')
                                 content_snippet = doc.page_content[:500] + "..." if len(doc.page_content) > 500 else doc.page_content
-                                st.code(content_snippet, language='java', line_numbers=False)
-                                st.caption(f"Source: {filename}")
+                                st.markdown(f"""
+                                    <div style='background-color: #f8f9fa; 
+                                              padding: 15px; 
+                                              border-radius: 5px; 
+                                              margin: 10px 0;'>
+                                        <div style='color: #666; font-size: 0.9em; margin-bottom: 5px;'>
+                                            Source: {filename}
+                                        </div>
+                                        <pre style='background-color: #f1f1f1; padding: 10px; border-radius: 5px; overflow-x: auto;'>
+                                            {content_snippet}
+                                        </pre>
+                                    </div>
+                                """, unsafe_allow_html=True)
                                 st.divider()
 
             except Exception as e:
@@ -236,4 +331,4 @@ Helpful Answer:"""
 
 
 else:
-    st.warning("Vector store could not be loaded or created. Please check the code directory path and permissions, and ensure your Google API Key is set.")
+    st.warning("⚠️ Vector store could not be loaded or created. Please check the code directory path and permissions, and ensure your Google API Key is set.")

@@ -1,4 +1,4 @@
-# Streamsets CodeLense
+# CodeSense
 
 A powerful Java codebase Q&A system that uses RAG (Retrieval-Augmented Generation) with Google's Gemini model to help developers understand and navigate their Java codebase.
 
@@ -58,7 +58,7 @@ streamlit run app.py
 ## Project Structure
 
 ```
-streamsets-codelense/
+codesense/
 ├── app.py                 # Main application file
 ├── requirements.txt       # Python dependencies
 ├── my-java-project/      # Your Java codebase directory
