@@ -115,17 +115,19 @@ The application indexes your Java source files, retrieves relevant code snippets
 
 ## 📁 Project Structure
 
+```text
 CodeSense/
-├── .venv/ # Virtual environment directory (ignored by git)
-├── my-java-project/ # DEFAULT directory for your Java source code (can be changed)
-│ └── ... (your .java files)
+├── .venv/                  # Virtual environment directory (ignored by git)
+├── my-java-project/        # DEFAULT directory for your Java source code (can be changed)
+│   └── ... (your .java files)
 ├── java_vectorstore_gemini/ # Local ChromaDB vector store (ignored by git)
-│ └── ... (index files)
-├── app.py # The main Streamlit application script
-├── requirements.txt # Python dependencies
-├── .env # Optional: For environment variables (ignored by git)
-├── .gitignore # Specifies intentionally untracked files for Git
-└── README.md # This file
+│   └── ... (index files)
+├── app.py                  # The main Streamlit application script
+├── requirements.txt        # Python dependencies
+├── .env                    # Optional: For environment variables (ignored by git)
+├── .gitignore              # Specifies intentionally untracked files for Git
+└── README.md               # This file
+
 
 ## 🤔 How It Works
 
