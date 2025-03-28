@@ -1,0 +1,14 @@
+# requirements.txt
+
+langchain
+# langchain-openai # Keep if you might switch back, otherwise remove
+langchain-community
+langchain-google-genai # Add this
+google-generativeai    # Add this (underlying SDK)
+streamlit
+chromadb
+sentence-transformers # Still needed if you want the *option* of local embeddings later
+tiktoken
+# Optional tree-sitter remains the same
+# tree-sitter
+# tree-sitter-languages
