@@ -18,7 +18,7 @@ DEFAULT_CODE_DIR = "./my-java-project" # CHANGE THIS if your code is elsewhere
 VECTORSTORE_DIR = "./java_vectorstore_gemini" # Directory for ChromaDB files
 # Google AI Model Names (Ensure these are available in your region/tier)
 GEMINI_EMBEDDING_MODEL = "models/embedding-001"
-GEMINI_LLM_MODEL = "gemini-1.5-pro-latest" # Or "gemini-1.5-flash-latest", "gemini-pro"
+GEMINI_LLM_MODEL = "gemini-2.5-pro-exp-03-25" # Or "gemini-1.5-flash-latest", "gemini-pro"
 
 # Setup logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
