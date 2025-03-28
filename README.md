@@ -21,8 +21,8 @@ A powerful Java codebase Q&A system that uses RAG (Retrieval-Augmented Generatio
 
 1. Clone the repository:
 ```bash
-git clone https://github.com/yourusername/streamsets-codelense.git
-cd streamsets-codelense
+git clone https://github.com/yourusername/CodeSense.git
+cd CodeSense
 ```
 
 2. Create and activate a virtual environment (recommended):
@@ -58,11 +58,11 @@ streamlit run app.py
 ## Project Structure
 
 ```
-codesense/
+CodeSense/
 ├── app.py                 # Main application file
 ├── requirements.txt       # Python dependencies
-├── my-java-project/      # Your Java codebase directory
-└── java_vectorstore_gemini/  # Vector store for embeddings
+├── java_vectorstore_gemini/  # Vector store for embeddings
+└── README.md             # Project documentation
 ```
 
 ## How It Works
