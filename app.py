@@ -164,7 +164,7 @@ with st.sidebar:
         help="Get yours from Google AI Studio (previously MakerSuite)."
     )
     if google_api_key:
-        os.environ["GOOGLE_API_KEY"] = "AIzaSyDCreBnk7MgG4W3CwgnrP1oXvOzkWoqETg"
+        os.environ["GOOGLE_API_KEY"] = google_api_key
     elif "GOOGLE_API_KEY" in os.environ:
         st.info("✅ Using Google AI API Key from environment variable.")
         google_api_key = os.environ["GOOGLE_API_KEY"]
