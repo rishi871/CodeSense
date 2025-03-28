@@ -127,7 +127,7 @@ CodeSense/
 ├── .env                    # Optional: For environment variables (ignored by git)
 ├── .gitignore              # Specifies intentionally untracked files for Git
 └── README.md               # This file
-
+```
 
 ## 🤔 How It Works
 
