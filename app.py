@@ -24,7 +24,11 @@ import google.generativeai as genai
 DEFAULT_CODE_DIR = "./my-java-project"
 VECTORSTORE_DIR = "./java_vectorstore_gemini"
 GEMINI_EMBEDDING_MODEL = "models/embedding-001"
+<<<<<<< HEAD
 GEMINI_LLM_MODEL = "gemini-2.5-pro-exp-03-25"
+=======
+GEMINI_LLM_MODEL = "gemini-2.5-pro-exp-03-25" # Or "gemini-1.5-flash-latest", "gemini-pro"
+>>>>>>> origin/main
 
 # Setup logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
