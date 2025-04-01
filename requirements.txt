@@ -1,15 +1,30 @@
 # requirements.txt
 
-langchain==0.1.0
-# langchain-openai # Keep if you might switch back, otherwise remove
-langchain-community==0.0.20
-langchain-google-genai==0.0.11
-google-generativeai>=0.4.1,<0.5.0
-streamlit==1.32.0
-chromadb==0.6.2
-sentence-transformers==2.5.1
-tiktoken==0.6.0
-arize-phoenix==8.20.0
-# Optional tree-sitter remains the same
-# tree-sitter
-# tree-sitter-languages
+# -- Core Frameworks --
+streamlit~=1.32.0       # For the Web UI
+langchain~=0.1.20        # Core LangChain library (Updated patch)
+langchain-community~=0.0.38 # Community integrations (Updated patch)
+
+# -- Google AI Integration --
+langchain-google-genai~=1.0.5 # LangChain specific integration (Updated)
+google-generativeai~=0.5.2    # Underlying Google AI SDK (Updated)
+
+# -- Vector Store & Foundational --
+chromadb~=0.5.0         # Chroma vector store (Corrected to stable release)
+tiktoken~=0.6.0         # Tokenizer used by LangChain
+
+# -- Optional: Observability/Evaluation --
+# arize-phoenix==8.20.0 # Keep if using Phoenix for tracing/evaluation
+
+# -- Optional: Code Parsing/Splitting Enhancement --
+# These enhance RecursiveCharacterTextSplitter.from_language(Language.JAVA)
+# but are not strictly required for basic splitting. Install if needed.
+# tree-sitter>=0.20.4      # Core Tree-sitter library
+# tree-sitter-languages>=1.8.0 # Bundled grammars including Java
+
+# -- Optional: Code Visualization (Not used in provided app.py) --
+# networkx>=3.0            # For graph data structures
+# graphviz>=0.20.0         # Python interface for Graphviz (requires system install too)
+
+# -- Removed (Not directly required by app.py with Google Embeddings) --
+# sentence-transformers==2.5.1
